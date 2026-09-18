@@ -95,6 +95,15 @@
     color:#cfeaff;
   }
 
+  .chip{
+    padding:5px 11px; border-radius:999px;
+    font-size:9.5px; letter-spacing:.24em; text-transform:uppercase;
+    color:#ffb3d8; border:1px solid rgba(255,62,165,.42);
+    background:rgba(255,62,165,.09);
+    box-shadow:0 0 20px rgba(255,62,165,.16);
+  }
+  .chip[hidden]{ display:none }
+
   .topbar .right{ text-align:right }
 
   .clock{
@@ -364,6 +373,7 @@
       <div class="brand">
         <div class="dot"></div>
         <h1>Shift Progress</h1>
+        <span class="chip" id="dayChip" hidden>Friday &middot; short day</span>
       </div>
       <div class="right">
         <div class="clock" id="clock">--:--:--</div>
@@ -394,8 +404,8 @@
     <div class="stats">
       <div class="card"><div class="k">Elapsed</div><div class="v" id="elapsed">0:00:00</div></div>
       <div class="card"><div class="k">Remaining</div><div class="v" id="remaining">9:00:00</div></div>
-      <div class="card"><div class="k">Shift length</div><div class="v">9<small>h 00m</small></div></div>
-      <div class="card"><div class="k">Clock out</div><div class="v">19:00</div></div>
+      <div class="card"><div class="k">Shift length</div><div class="v" id="shiftLen">9<small>h 00m</small></div></div>
+      <div class="card"><div class="k">Clock out</div><div class="v" id="clockOut">19:00</div></div>
     </div>
 
   </main>
@@ -495,8 +505,12 @@
 (function(){
   'use strict';
 
-  var START_HOUR = 10;   // 10:00
-  var END_HOUR   = 19;   // 19:00
+  var START_HOUR = 10;                  // clock in, every day
+  var END_HOUR   = 19;                  // clock out, Mon-Thu
+  var END_HOUR_FRIDAY = 18;             // early finish on Fridays
+
+  // 0 = Sunday ... 5 = Friday
+  function endHourFor(d){ return d.getDay() === 5 ? END_HOUR_FRIDAY : END_HOUR; }
 
   var A0 = 135;          // needle angle at 0%
   var SPAN = 270;        // total sweep, degrees (clockwise = to the right)
@@ -512,6 +526,7 @@
   var needle = $('needle'), gProg = $('gProg'), gPct = $('gPct'), gEta = $('gEta');
   var lampRun = $('lampRun'), lampRed = $('lampRed'), lampEnd = $('lampEnd');
   var gearVal = $('gearVal');
+  var shiftLen = $('shiftLen'), clockOut = $('clockOut'), dayChip = $('dayChip');
 
   function pad(n){ return (n < 10 ? '0' : '') + n; }
 
@@ -536,18 +551,23 @@
   }
 
   // ---- hour ruler (screen 1) -------------------------------------------
-  var ticks = [];
-  (function(){
+  var ticks = [], rulerEnd = null;
+
+  function buildRuler(endHour){
+    if (rulerEnd === endHour) return;
+    rulerEnd = endHour;
     var ruler = $('ruler');
-    for (var h = START_HOUR; h <= END_HOUR; h++){
+    ruler.innerHTML = '';
+    ticks = [];
+    for (var h = START_HOUR; h <= endHour; h++){
       var t = document.createElement('div');
       t.className = 'tick';
-      t.style.left = ((h - START_HOUR) / (END_HOUR - START_HOUR) * 100) + '%';
+      t.style.left = ((h - START_HOUR) / (endHour - START_HOUR) * 100) + '%';
       t.innerHTML = '<i></i><span>' + pad(h) + ':00</span>';
       ruler.appendChild(t);
       ticks.push({ el:t, hour:h });
     }
-  })();
+  }
 
   // ---- gauge geometry ---------------------------------------------------
   var gTicks = [];
@@ -657,7 +677,12 @@
   function tick(){
     var now   = new Date();
     var start = at(now, START_HOUR);
-    var end   = at(now, END_HOUR);
+    var endHour = endHourFor(now);
+    var spanH   = endHour - START_HOUR;
+    var end     = at(now, endHour);
+    var friday  = now.getDay() === 5;
+
+    buildRuler(endHour);
     var total = end - start;
 
     var p = Math.min(1, Math.max(0, (now - start) / total)) * 100;
@@ -690,10 +715,10 @@
       sub.innerHTML = 'Starts in <b>' + hms(start - now) + '</b>';
     } else if (after){
       badge.textContent = 'Shift complete'; badge.className = 'badge done';
-      sub.innerHTML = 'Free since <b>' + pad(END_HOUR) + ':00</b>';
+      sub.innerHTML = 'Free since <b>' + pad(endHour) + ':00</b>';
     } else {
       badge.textContent = 'In progress'; badge.className = 'badge';
-      sub.innerHTML = '<b>' + pad(START_HOUR) + ':00</b> &rarr; <b>' + pad(END_HOUR) + ':00</b>';
+      sub.innerHTML = '<b>' + pad(START_HOUR) + ':00</b> &rarr; <b>' + pad(endHour) + ':00</b>';
     }
 
     elapsedEl.textContent   = hms(elapsedMs);
@@ -704,8 +729,13 @@
     setDigits(odoCells,  elapsedMs);
     setDigits(tripCells, remainingMs);
 
-    var hourIdx = before ? 0 : (after ? 9 : Math.floor((now - start) / 3600000) + 1);
-    gearVal.innerHTML = (hourIdx || '&ndash;') + '<em>/9</em>';
+    var hourIdx = before ? 0 : (after ? spanH : Math.floor((now - start) / 3600000) + 1);
+    gearVal.innerHTML = (hourIdx || '&ndash;') + '<em>/' + spanH + '</em>';
+
+    // shift-length + clock-out cards, and the Friday chip
+    shiftLen.innerHTML = spanH + '<small>h 00m</small>';
+    clockOut.textContent = pad(endHour) + ':00';
+    dayChip.hidden = !friday;
 
     lampRun.className = 'lamp' + (!before && !after ? ' on cyan' : '');
     lampRed.className = 'lamp' + (p >= 90 && !after ? ' on red' : '');
